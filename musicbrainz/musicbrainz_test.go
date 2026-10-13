@@ -1,10 +1,14 @@
 package musicbrainz
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/time/rate"
 )
 
 func TestUUID(t *testing.T) {
@@ -86,4 +90,58 @@ func TestReleaseOrGroupEnTitle(t *testing.T) {
 	release.ReleaseGroup.Title = "二度寝"
 	release.ReleaseGroup.Aliases = []Alias{{Name: "Nidone", Locale: "en"}}
 	assert.Equal(t, "Nidone", ReleaseOrGroupEnTitle(release))
+}
+
+func TestSearchReleaseFilterIDs(t *testing.T) {
+	t.Parallel()
+
+	tcs := []struct {
+		name         string
+		query        ReleaseQuery
+		searchBody   string
+		expSearch    []string // substrings of the lucene query, or nil if we expect no search
+		expReleaseID string
+	}{
+		{
+			name:         "single filter id skips search",
+			query:        ReleaseQuery{Release: "nevermind", FilterMBReleaseIDs: []string{"aaa"}},
+			expReleaseID: "aaa",
+		},
+		{
+			name:         "multiple filter ids are required",
+			query:        ReleaseQuery{Release: "nevermind", FilterMBReleaseIDs: []string{"aaa-1", "bbb-2"}},
+			searchBody:   `{"releases":[{"id":"bbb-2","score":100}]}`,
+			expSearch:    []string{`+reid:(aaa\-1 OR bbb\-2)`, `release:(nevermind)`},
+			expReleaseID: "bbb-2",
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var searched bool
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/release" {
+					searched = true
+					query := r.URL.Query().Get("query")
+					for _, exp := range tc.expSearch {
+						assert.Contains(t, query, exp)
+					}
+					_, _ = w.Write([]byte(tc.searchBody))
+					return
+				}
+				id := strings.TrimPrefix(r.URL.Path, "/release/")
+				_, _ = w.Write([]byte(`{"id":"` + id + `"}`))
+			}))
+			t.Cleanup(srv.Close)
+
+			c := MBClient{BaseURL: srv.URL, HTTPClient: srv.Client(), Limiter: rate.NewLimiter(rate.Inf, 1)}
+
+			release, err := c.SearchRelease(t.Context(), tc.query)
+			require.NoError(t, err)
+			assert.Equal(t, tc.expReleaseID, release.ID)
+			assert.Equal(t, tc.expSearch != nil, searched)
+		})
+	}
 }

@@ -61,6 +61,10 @@ type ReleaseQuery struct {
 	CatalogueNum string
 	Barcode      string
 	NumTracks    int
+
+	// FilterMBReleaseIDs restricts the search to only these releases. For example the releases
+	// which have the disc that was ripped.
+	FilterMBReleaseIDs []string
 }
 
 func (c *MBClient) SearchRelease(ctx context.Context, q ReleaseQuery) (*Release, error) {
@@ -71,10 +75,20 @@ func (c *MBClient) SearchRelease(ctx context.Context, q ReleaseQuery) (*Release,
 		}
 		return release, nil
 	}
+	if len(q.FilterMBReleaseIDs) == 1 {
+		release, err := c.GetRelease(ctx, q.FilterMBReleaseIDs[0])
+		if err != nil {
+			return nil, fmt.Errorf("get only filtered release: %w", err)
+		}
+		return release, nil
+	}
 
 	// https://beta.musicbrainz.org/doc/MusicBrainz_API/Search#Release
 
 	var params []string
+	if len(q.FilterMBReleaseIDs) > 0 {
+		params = append(params, "+"+anyField("reid", q.FilterMBReleaseIDs)) // required
+	}
 	if q.MBArtistID != "" {
 		params = append(params, field("arid", q.MBArtistID))
 	}
@@ -582,6 +596,15 @@ func field(k string, v any) string {
 	vstr := fmt.Sprint(v)
 	vstr = escapeLucene.Replace(vstr)
 	return fmt.Sprintf("%s:(%v)", k, vstr)
+}
+
+// anyField matches any of the values for the field.
+func anyField(k string, vs []string) string {
+	escaped := make([]string, 0, len(vs))
+	for _, v := range vs {
+		escaped = append(escaped, escapeLucene.Replace(v))
+	}
+	return fmt.Sprintf("%s:(%s)", k, strings.Join(escaped, " OR "))
 }
 
 func boostField(f string, boost float64) string {
