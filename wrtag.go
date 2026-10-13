@@ -34,6 +34,7 @@ import (
 	"go.senan.xyz/wrtag/musicbrainz"
 	"go.senan.xyz/wrtag/originfile"
 	"go.senan.xyz/wrtag/pathformat"
+	"go.senan.xyz/wrtag/ripfile"
 	"go.senan.xyz/wrtag/tags"
 	"go.senan.xyz/wrtag/tags/normtag"
 )
@@ -68,6 +69,7 @@ type SearchResult struct {
 	DestDir    string
 	Diff       []Diff
 	OriginFile *originfile.OriginFile
+	RipDiscs   []ripfile.Disc
 }
 
 // ImportCondition defines the conditions under which a release will be imported.
@@ -152,9 +154,20 @@ func ProcessDir(
 		return nil, fmt.Errorf("find origin file: %w", err)
 	}
 
+	var ripDiscs []ripfile.Disc
 	if mbid == "" {
 		if err := extendQueryWithOriginFile(ctx, &query, originFile); err != nil {
 			return nil, fmt.Errorf("use origin file: %w", err)
+		}
+
+		// read logs from CD rippers, if any exist. only when we need to search, so that we don't read
+		// every log in the library when re-tagging it
+		ripDiscs, err = ripfile.Find(ctx, srcDir)
+		if err != nil {
+			return nil, fmt.Errorf("find rip logs: %w", err)
+		}
+		if err := extendQueryWithRipDiscs(ctx, &cfg.MusicBrainzClient, &query, ripDiscs); err != nil {
+			return nil, fmt.Errorf("use rip logs: %w", err)
 		}
 	}
 
@@ -175,7 +188,7 @@ func ProcessDir(
 	}
 
 	if len(pathTags) != len(releaseTracks) {
-		return &SearchResult{release, query, 0, "", diff, originFile}, fmt.Errorf("%w: %d remote / %d local", ErrTrackCountMismatch, len(releaseTracks), len(pathTags))
+		return &SearchResult{release, query, 0, "", diff, originFile, ripDiscs}, fmt.Errorf("%w: %d remote / %d local", ErrTrackCountMismatch, len(releaseTracks), len(pathTags))
 	}
 
 	var shouldImport bool
@@ -189,7 +202,7 @@ func ProcessDir(
 	}
 
 	if !shouldImport {
-		return &SearchResult{release, query, score, "", diff, originFile}, ErrScoreTooLow
+		return &SearchResult{release, query, score, "", diff, originFile, ripDiscs}, ErrScoreTooLow
 	}
 
 	destDir, err := DestDir(&cfg.PathFormat, release)
@@ -301,7 +314,7 @@ func ProcessDir(
 		}
 	}
 
-	return &SearchResult{release, query, score, destDir, diff, originFile}, nil
+	return &SearchResult{release, query, score, destDir, diff, originFile, ripDiscs}, nil
 }
 
 type releaseTrack struct {
@@ -1269,6 +1282,68 @@ func extendQueryWithOriginFile(ctx context.Context, q *musicbrainz.ReleaseQuery,
 		q.Date = time.Date(originFile.EditionYear, 0, 0, 0, 0, 0, 0, time.UTC)
 	}
 	return nil
+}
+
+// extendQueryWithRipDiscs uses the discs from the logs that a CD ripper left in the source dir. If the discs
+// are all the tracks that we have, and we don't already know the edition, then the releases which have every
+// disc are the only candidates for the search.
+func extendQueryWithRipDiscs(ctx context.Context, mb *musicbrainz.MBClient, q *musicbrainz.ReleaseQuery, discs []ripfile.Disc) error { //nolint:unparam
+	if len(discs) == 0 {
+		return nil
+	}
+
+	// if the discs don't add up to the tracks we have, then the logs could be for something else. for example
+	// a disc that isn't here, so they can't rule out the right release
+	var numTracks int
+	for _, disc := range discs {
+		numTracks += disc.NumTracks
+	}
+	if numTracks != q.NumTracks {
+		slog.DebugContext(ctx, "rip logs have a different number of tracks, not using", "logs", numTracks, "local", q.NumTracks)
+		return nil
+	}
+
+	// the music came from a CD, but the tags might know better (Enhanced CD, HDCD, ...)
+	q.Format = cmp.Or(q.Format, "CD")
+
+	// a catalogue number or barcode, from the tags or an origin file, already says which edition we have. a
+	// disc ID is often only on some of the editions with that disc, so it shouldn't rule out the right one
+	if q.CatalogueNum != "" || q.Barcode != "" {
+		slog.DebugContext(ctx, "edition is already known, not looking up rip discs")
+		return nil
+	}
+
+	var candidates [][]string
+	for _, disc := range discs {
+		releaseIDs, err := mb.LookupDiscID(ctx, disc.ID)
+		if err != nil {
+			// the disc ID is only a hint, so carry on with a normal search
+			slog.WarnContext(ctx, "lookup disc id", "disc_id", disc.ID, "err", err)
+			continue
+		}
+		slog.DebugContext(ctx, "looked up disc id", "disc_id", disc.ID, "num_releases", len(releaseIDs))
+		if len(releaseIDs) > 0 {
+			candidates = append(candidates, releaseIDs)
+		}
+	}
+
+	// for multi-disc releases, the release should have every disc
+	q.FilterMBReleaseIDs = intersect(candidates)
+	return nil
+}
+
+// intersect returns the items that are in every set, in the order of the first set.
+func intersect(sets [][]string) []string {
+	if len(sets) == 0 {
+		return nil
+	}
+	var out []string
+	for _, item := range sets[0] {
+		if !slices.Contains(out, item) && !slices.ContainsFunc(sets[1:], func(set []string) bool { return !slices.Contains(set, item) }) {
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 var trlock = treelock.NewTreeLock()

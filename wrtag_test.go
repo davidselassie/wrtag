@@ -1,10 +1,16 @@
 package wrtag
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.senan.xyz/wrtag/musicbrainz"
+	"go.senan.xyz/wrtag/ripfile"
+	"golang.org/x/time/rate"
 )
 
 // ⚠️ Note, core wrtag functionality is tested from ./cmd/wrtag/
@@ -170,4 +176,82 @@ func TestReflinkCanModifyDest(t *testing.T) {
 
 	dryRunReflink := NewReflink(true)
 	assert.False(t, dryRunReflink.CanModifyDest())
+}
+
+func TestIntersect(t *testing.T) {
+	t.Parallel()
+
+	assert.Nil(t, intersect(nil))
+	assert.Equal(t, []string{"a", "b"}, intersect([][]string{{"a", "b", "a"}}))
+	assert.Equal(t, []string{"b", "c"}, intersect([][]string{{"a", "b", "c"}, {"c", "b"}, {"d", "b", "c"}}))
+	assert.Empty(t, intersect([][]string{{"a"}, {"b"}}))
+}
+
+func TestExtendQueryWithRipDiscs(t *testing.T) {
+	t.Parallel()
+
+	// disc 1 and 2 are both on releases a and b, and c only has disc 1. other is on a different release.
+	// looking up broken is an error, and unknown isn't on any releases
+	responses := map[string]string{
+		"disc1": `{"releases":[{"id":"a"},{"id":"b"},{"id":"c"}]}`,
+		"disc2": `{"releases":[{"id":"b"},{"id":"a"}]}`,
+		"other": `{"releases":[{"id":"o"}]}`,
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		discID := strings.TrimPrefix(r.URL.Path, "/discid/")
+		if discID == "broken" {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		resp, ok := responses[discID]
+		if !ok {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte(resp))
+	}))
+	t.Cleanup(srv.Close)
+
+	mb := &musicbrainz.MBClient{BaseURL: srv.URL, HTTPClient: srv.Client(), Limiter: rate.NewLimiter(rate.Inf, 1)}
+
+	// each disc has 2 tracks
+	discs := func(ids ...string) []ripfile.Disc {
+		var discs []ripfile.Disc
+		for _, id := range ids {
+			discs = append(discs, ripfile.Disc{ID: id, NumTracks: 2})
+		}
+		return discs
+	}
+
+	tcs := []struct {
+		name      string
+		discs     []ripfile.Disc
+		numTracks int
+		format    string
+		catNum    string
+		barcode   string
+		expFilter []string
+		expFormat string
+	}{
+		{name: "no discs", numTracks: 4},
+		{name: "single disc", discs: discs("disc1"), numTracks: 2, expFilter: []string{"a", "b", "c"}, expFormat: "CD"},
+		{name: "multi disc", discs: discs("disc1", "disc2"), numTracks: 4, expFilter: []string{"a", "b"}, expFormat: "CD"},
+		{name: "unknown disc is skipped", discs: discs("disc1", "unknown"), numTracks: 4, expFilter: []string{"a", "b", "c"}, expFormat: "CD"},
+		{name: "lookup error is skipped", discs: discs("disc1", "broken"), numTracks: 4, expFilter: []string{"a", "b", "c"}, expFormat: "CD"},
+		{name: "different number of tracks", discs: discs("disc1"), numTracks: 3},
+		{name: "no common release", discs: discs("disc1", "other"), numTracks: 4, expFormat: "CD"},
+		{name: "tags have a format", discs: discs("disc1"), numTracks: 2, format: "Enhanced CD", expFilter: []string{"a", "b", "c"}, expFormat: "Enhanced CD"},
+		{name: "catalogue number is known", discs: discs("disc1"), numTracks: 2, catNum: "DGCD-24425", expFormat: "CD"},
+		{name: "barcode is known", discs: discs("disc1"), numTracks: 2, barcode: "720642442524", expFormat: "CD"},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			q := musicbrainz.ReleaseQuery{NumTracks: tc.numTracks, Format: tc.format, CatalogueNum: tc.catNum, Barcode: tc.barcode}
+			require.NoError(t, extendQueryWithRipDiscs(t.Context(), mb, &q, tc.discs))
+			assert.Equal(t, tc.expFilter, q.FilterMBReleaseIDs)
+			assert.Equal(t, tc.expFormat, q.Format)
+		})
+	}
 }

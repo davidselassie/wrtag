@@ -1,0 +1,62 @@
+# the tags don't say much, and the search would find something else. but the EAC log has a disc ID,
+# and the (mocked) MusicBrainz lookup has only one release with that disc
+exec tag write deuce/01.flac title 'Body Bop Jive'
+exec tag write deuce/02.flac title 'Sneaker Gun Fire'
+exec tag write deuce/03.flac title 'Jab Gee'
+exec tag write deuce/04.flac title 'Bad Scene'
+exec tag write deuce/05.flac title 'La La Bola'
+exec tag write deuce/06.flac title 'Deuce Avenue'
+exec tag write deuce/07.flac title 'Faster Blaster'
+exec tag write deuce/08.flac title 'Sugee'
+exec tag write deuce/09.flac title 'Sweet Sweet Money'
+exec tag write deuce/10.flac title 'Love On'
+exec tag write deuce/11.flac title 'No Tomorrow'
+exec tag write deuce/12.flac title 'Future Sex'
+exec tag write deuce/*.flac album 'Deuce Avenue'
+exec tag write deuce/*.flac albumartist 'Alan Vega'
+exec tag write deuce/*.flac artist 'Alan Vega'
+
+env WRTAG_LOG_LEVEL=debug
+env WRTAG_PATH_FORMAT='albums/{{ .Release.Title | safepath }}/{{ pad0 2 .Track.Position }}{{ .Ext }}'
+
+# an origin file with a catalogue number already says which edition we have, so the disc isn't looked up.
+# the search fixture is a different release with 3 tracks, so there's no match
+! exec wrtag move deuce/
+stderr 'using origin file.*\[Musidisc #105582\]'
+stderr 'edition is already known'
+! stderr 'looked up disc id'
+stderr 'track count mismatch'
+rm deuce/origin.yaml
+
+exec wrtag move deuce/
+stderr 'found rip log.*Deuce Avenue.log.*IainawmxFmzgjCaQRLUhIkRsYL0-'
+stderr 'looked up disc id.*disc_id=IainawmxFmzgjCaQRLUhIkRsYL0- num_releases=1'
+stderr 'matched.*musicbrainz.org/release/71d6f1d1-1190-4924-b2de-dfc1c2c8eea7'
+exec tag check albums/*/*.flac musicbrainz_albumid '71d6f1d1-1190-4924-b2de-dfc1c2c8eea7'
+
+-- deuce/Deuce Avenue.log --
+Exact Audio Copy V1.6 from 23. October 2020
+
+TOC of the extracted CD
+
+     Track |   Start  |  Length  | Start sector | End sector
+    ---------------------------------------------------------
+        1  |  0:00.00 |  3:00.00 |         0    |    13499
+        2  |  3:00.00 |  3:36.00 |     13500    |    29699
+        3  |  6:36.00 |  3:07.00 |     29700    |    43724
+        4  |  9:43.00 |  4:10.00 |     43725    |    62474
+        5  | 13:53.00 |  2:44.00 |     62475    |    74774
+        6  | 16:37.00 |  4:42.00 |     74775    |    95924
+        7  | 21:19.00 |  3:29.00 |     95925    |   111599
+        8  | 24:48.00 |  2:56.00 |    111600    |   124799
+        9  | 27:44.00 |  3:52.00 |    124800    |   142199
+       10  | 31:36.00 |  3:18.00 |    142200    |   157049
+       11  | 34:54.00 |  4:15.00 |    157050    |   176174
+       12  | 39:09.00 |  3:42.00 |    176175    |   192824
+-- deuce/origin.yaml --
+Artist:         Alan Vega
+Name:           Deuce Avenue
+Edition year:   1990
+Media:          CD
+Catalog number: 105582
+Record label:   Musidisc

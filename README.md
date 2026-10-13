@@ -72,6 +72,7 @@ To describe the general workflow:
 - Rescanning the library and processing it for new changes in MusicBrainz (`wrtag sync`).
 - An optional **web interface** for importing new releases over the network. Allows the user to be notified and confirm details if there is no 100% match found.
 - Support for [gazelle-origin](https://github.com/x1ppy/gazelle-origin) files to improve matching from certain sources.
+- Support for CD rip logs from EAC, XLD, whipper, dBpoweramp, and others, to match the exact release by the ripped disc's [MusicBrainz disc ID](https://musicbrainz.org/doc/Disc_ID).
 - Support for **Linux**, **macOS**, and **Windows** with static/portable [binaries available](https://github.com/sentriz/wrtag/releases) for each.
 
 # Included tools

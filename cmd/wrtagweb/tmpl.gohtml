@@ -24,6 +24,9 @@
       {{ if .SearchResult.Data.OriginFile }}
         {{ template "originfile" .SearchResult.Data.OriginFile }}
       {{ end }}
+      {{ if .SearchResult.Data.RipDiscs }}
+        {{ template "ripdiscs" .SearchResult.Data.RipDiscs }}
+      {{ end }}
       {{ if .ResearchLinks.Data }}
         <p>research links <span class="inline-flex flex-wrap gap-2">{{ range .ResearchLinks.Data }}<a target="_blank" href="{{ .URL | url }}">{{ .Name }}</a>{{ end }}</span></p>
       {{ end }}
@@ -67,6 +70,15 @@ origin file info
   {{ end }}
   {{ if not (eq .EditionYear 0) }}
     <tr><td class="px-2 text-gray-500">edition year</td> <td class="px-2">{{ .EditionYear }}</td></tr>
+  {{ end }}
+</table>
+{{ end }}
+
+{{ define "ripdiscs" }}
+rip log discs
+<table>
+  {{ range . }}
+    <tr><td class="px-2"><a href="https://musicbrainz.org/cdtoc/{{ .ID }}" rel="noopener noreferrer" target="_blank">{{ .ID }}</a></td> <td class="px-2 text-gray-500">{{ .NumTracks }} tracks</td></tr>
   {{ end }}
 </table>
 {{ end }}
