@@ -45,10 +45,12 @@ jobs:
     if: ${{ needs.release-please.outputs.release_created }}
     strategy:
       matrix:
-        os: [linux, windows, darwin]
+        os: [linux, windows, darwin, freebsd]
         arch: [amd64, arm64, 386]
         exclude:
           - os: darwin
+            arch: 386
+          - os: freebsd
             arch: 386
     steps:
       - name: Checkout
