@@ -25,6 +25,7 @@ import (
 	"go.senan.xyz/wrtag"
 	"go.senan.xyz/wrtag/cmd/internal/wrtagflag"
 	"go.senan.xyz/wrtag/cmd/internal/wrtaglog"
+	"go.senan.xyz/wrtag/download"
 	"go.senan.xyz/wrtag/fileutil"
 	"go.senan.xyz/wrtag/notifications"
 	"go.senan.xyz/wrtag/researchlink"
@@ -87,15 +88,18 @@ func main() {
 		}
 
 		if flag.NArg() != 1 {
-			slog.Error("please provide a single path")
+			slog.Error("please provide a single path or URL")
 			return
 		}
 
-		src := flag.Arg(0)
-		src, err := filepath.Abs(src)
-		if err != nil {
-			slog.Error("making path abs", "err", err)
-			return
+		src, isURL := flag.Arg(0), download.IsURL(flag.Arg(0))
+		if !isURL {
+			var err error
+			src, err = filepath.Abs(src)
+			if err != nil {
+				slog.Error("making path abs", "err", err)
+				return
+			}
 		}
 
 		ctx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
@@ -107,12 +111,16 @@ func main() {
 			return
 		}
 
-		dir, isArchive := src, ziputil.IsArchive(src)
-		if isArchive {
+		dir, isArchive := src, !isURL && ziputil.IsArchive(src)
+		if isURL || isArchive {
 			var cleanup func()
-			dir, cleanup, err = ziputil.Extract(src)
+			if isURL {
+				dir, cleanup, err = download.Release(ctx, src)
+			} else {
+				dir, cleanup, err = ziputil.Extract(src)
+			}
 			if err != nil {
-				slog.Error("extracting archive", "err", err)
+				slog.Error("fetching source", "err", err)
 				return
 			}
 			defer cleanup()

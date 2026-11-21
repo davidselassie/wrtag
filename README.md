@@ -114,6 +114,14 @@ The source can also be a zip archive. It is extracted to a temporary directory (
 $ wrtag move "Example.zip"
 ```
 
+#### Importing from a URL
+
+The source can also be an `http` or `https` URL, which is downloaded to a temporary directory and imported from there. It may point to a zip archive, a single file, or a directory listing like those served by nginx, Apache or Caddy. From a listing, every file directly in it is downloaded, as well as the files in the folders it links to, one level down, for disc folders. The operation applies to the downloaded files, and the remote files are never changed:
+
+```console
+$ wrtag copy "https://example.com/music/Example/"
+```
+
 ### Re-tagging already imported music
 
 Re-tagging your music can be useful for a few reasons. For example, if your [path-format](#path-format) configuration has changed, or the metadata in the MusicBrainz database has changed.
@@ -176,7 +184,7 @@ flowchart LR
 
 ### API
 
-Jobs are added to the queue with an HTTP request like `POST <wrtag.host>/op/<copy|move|reflink>` with form value `path=<absolute path to directory or zip archive>`. Optional form value `mbid=<musicbrainz release URL>` can be supplied if you know your release as well as `confirm` if you really know your release. All of the form values can be sent in the HTML form body along with the `Content-Type` set to `application/x-www-form-urlencoded`, or as URL query parameters.
+Jobs are added to the queue with an HTTP request like `POST <wrtag.host>/op/<copy|move|reflink>` with form value `path=<absolute path to directory or zip archive, or a URL>`. Optional form value `mbid=<musicbrainz release URL>` can be supplied if you know your release as well as `confirm` if you really know your release. All of the form values can be sent in the HTML form body along with the `Content-Type` set to `application/x-www-form-urlencoded`, or as URL query parameters.
 
 The external API requires HTTP Basic authentication with `-web-api-key` as the password (no username). The web UI authentication is controlled by `-web-auth`: either `disabled`, or `basic-auth-from-api-key` (the default) which uses the same API key.
 

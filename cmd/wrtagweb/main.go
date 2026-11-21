@@ -34,6 +34,7 @@ import (
 	"go.senan.xyz/wrtag"
 	wrtagflag "go.senan.xyz/wrtag/cmd/internal/wrtagflag"
 	"go.senan.xyz/wrtag/cmd/internal/wrtaglog"
+	"go.senan.xyz/wrtag/download"
 	"go.senan.xyz/wrtag/notifications"
 	"go.senan.xyz/wrtag/researchlink"
 	"go.senan.xyz/wrtag/ziputil"
@@ -186,11 +187,13 @@ func main() {
 			respErr(http.StatusBadRequest, "no path provided")
 			return
 		}
-		if !filepath.IsAbs(path) {
-			respErr(http.StatusBadRequest, "filepath not absolute")
-			return
+		if !download.IsURL(path) {
+			if !filepath.IsAbs(path) {
+				respErr(http.StatusBadRequest, "filepath not absolute")
+				return
+			}
+			path = filepath.Clean(path)
 		}
-		path = filepath.Clean(path)
 
 		ctx := r.Context()
 
@@ -323,11 +326,13 @@ func main() {
 			http.Error(w, "no path provided", http.StatusBadRequest)
 			return
 		}
-		if !filepath.IsAbs(pth) {
-			http.Error(w, "filepath not abs", http.StatusBadRequest)
-			return
+		if !download.IsURL(pth) {
+			if !filepath.IsAbs(pth) {
+				http.Error(w, "filepath not abs", http.StatusBadRequest)
+				return
+			}
+			pth = filepath.Clean(pth)
 		}
-		pth = filepath.Clean(pth)
 		useMBID := r.FormValue("mbid")
 		if strings.Contains(useMBID, "/") {
 			useMBID = path.Base(useMBID) // accept release URL
@@ -448,10 +453,15 @@ func processJob(ctx context.Context, cfg *wrtag.Config, notifs *notifications.No
 	var searchResult *wrtag.SearchResult
 	var processErr error
 
-	dir, isArchive := job.SourcePath, ziputil.IsArchive(job.SourcePath)
-	if isArchive {
+	isURL := download.IsURL(job.SourcePath)
+	dir, isArchive := job.SourcePath, !isURL && ziputil.IsArchive(job.SourcePath)
+	if isURL || isArchive {
 		var cleanup func()
-		dir, cleanup, processErr = ziputil.Extract(job.SourcePath)
+		if isURL {
+			dir, cleanup, processErr = download.Release(ctx, job.SourcePath)
+		} else {
+			dir, cleanup, processErr = ziputil.Extract(job.SourcePath)
+		}
 		if processErr == nil {
 			defer cleanup()
 		}
@@ -615,8 +625,15 @@ var uiTmpl = htmltemplate.Must(
 )
 
 var funcMap = htmltemplate.FuncMap{
-	"now":  func() int64 { return time.Now().UnixMilli() },
-	"file": func(p string) string { ur, _ := url.Parse("file://"); ur.Path = p; return ur.String() },
+	"now": func() int64 { return time.Now().UnixMilli() },
+	"file": func(p string) string {
+		if download.IsURL(p) {
+			return p
+		}
+		ur, _ := url.Parse("file://")
+		ur.Path = p
+		return ur.String()
+	},
 	"url":  func(u string) htmltemplate.URL { return htmltemplate.URL(u) }, //nolint:gosec
 	"join": func(delim string, items []string) string { return strings.Join(items, delim) },
 	"pad0": func(amount, n int) string { return fmt.Sprintf("%0*d", amount, n) },

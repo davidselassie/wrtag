@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -58,6 +59,13 @@ func TestScripts(t *testing.T) {
 	testscript.Run(t, testscript.Params{
 		Dir:                 "testdata/scripts",
 		RequireExplicitExec: true,
+		Setup: func(env *testscript.Env) error {
+			// serve the work dir, with directory listings, for importing from URLs
+			srv := httptest.NewServer(http.FileServer(http.Dir(env.WorkDir)))
+			env.Defer(srv.Close)
+			env.Setenv("SERVE_URL", srv.URL)
+			return nil
+		},
 	})
 }
 
